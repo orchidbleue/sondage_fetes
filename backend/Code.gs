@@ -84,9 +84,7 @@ function doPost(e) {
     const verrou=LockService.getScriptLock();
     verrou.waitLock(15000);
     try {
-      // Si une ancienne structure de feuille existe encore, on l'archive
-      // automatiquement au lieu de refuser la réponse.
-      const feuille=preparerFeuilleReponses_(obtenirClasseur_(), true);
+      const feuille=preparerFeuilleReponses_(obtenirClasseur_(), false);
       const dates=new Set(payload.dates);
       const ligne=[payload.id,new Date(),pourFeuille_(responsable),pourFeuille_(participant),
         payload.aucunBesoin?1:0,payload.dates.join(', ')]
@@ -101,10 +99,10 @@ function doPost(e) {
       else feuille.getRange(cible,1,1,ligne.length).setValues([ligne]);
       SpreadsheetApp.flush();
     } finally { verrou.releaseLock(); }
-    return reponseIframe_(nonce,true,'');
+    return reponseIframe_(nonce,true);
   } catch(erreur) {
     console.error('Échec du sondage : '+erreur.message);
-    return reponseIframe_(nonce,false,codeErreur_(erreur));
+    return reponseIframe_(nonce,false);
   }
 }
 function validerNom_(valeur) {
@@ -118,51 +116,10 @@ function pourFeuille_(valeur) {
   return /^[=+@-]/.test(valeur)?"'"+valeur:valeur;
 }
 function obtenirClasseur_() {
-  // Un script lié à un Google Sheets peut être exécuté sans tableur « actif »
-  // depuis une application Web. L'identifiant est conservé au moment de
-  // l'initialisation pour permettre la connexion côté serveur.
-  const proprietes=PropertiesService.getScriptProperties();
-  const actif=SpreadsheetApp.getActiveSpreadsheet();
-  if(actif) {
-    const id=actif.getId();
-    if(proprietes.getProperty('ORCHID_SPREADSHEET_ID')!==id) {
-      proprietes.setProperty('ORCHID_SPREADSHEET_ID',id);
-    }
-    return actif;
-  }
-  const id=proprietes.getProperty('ORCHID_SPREADSHEET_ID');
-  if(!id) throw new Error('TABLEUR_NON_INITIALISE : exécutez initialiserSondage depuis votre Google Sheets.');
-  return SpreadsheetApp.openById(id);
+  const classeur=SpreadsheetApp.getActiveSpreadsheet();
+  if(!classeur) throw new Error('Créez ce script à partir d’un Google Sheets.');
+  return classeur;
 }
-
-/**
- * À exécuter dans Apps Script si un envoi échoue.
- * Vérifie la structure du tableur sans afficher les noms des familles.
- */
-function diagnostiquerSondage() {
-  const classeur=obtenirClasseur_();
-  const feuille=classeur.getSheetByName(NOM_FEUILLE_REPONSES);
-  const bilan=classeur.getSheetByName(NOM_FEUILLE_BILAN);
-  if(!feuille) throw new Error('La feuille Réponses est absente : exécutez initialiserSondage.');
-  const colonnes=feuille.getRange(1,1,1,ENTETES.length).getValues()[0];
-  const differences=ENTETES.filter(function(t,i){return colonnes[i]!==t;});
-  if(differences.length) throw new Error('Colonnes incorrectes : exécutez initialiserSondage. Champs concernés : '+differences.join(', '));
-  if(!bilan) throw new Error('La feuille Bilan est absente : exécutez initialiserSondage.');
-  const result='Connexion OK | colonnes conformes | '+Math.max(0,feuille.getLastRow()-1)+' réponse(s) | 6 dates offertes.';
-  console.log(result);
-  return result;
-}
-
-function codeErreur_(erreur) {
-  const message=String(erreur&&erreur.message||'');
-  if(/TABLEUR_NON_INITIALISE|Créez ce script|classeur|spreadsheet/i.test(message)) return 'TABLEUR';
-  if(/Ancien tableau|Ancienne version|colonnes|en-tête/i.test(message)) return 'COLONNES';
-  if(/Date non offerte|Dates invalides|Choix incohérent/i.test(message)) return 'DATES';
-  if(/Nom manquant|Nom invalide|Identifiant invalide|Requête invalide/i.test(message)) return 'VALIDATION';
-  if(/permission|autorisa|accès|access denied/i.test(message)) return 'ACCES';
-  return 'SERVEUR';
-}
-
 function preparerFeuilleReponses_(classeur, autoriserArchivage) {
   let feuille=classeur.getSheetByName(NOM_FEUILLE_REPONSES);
   if(!feuille) feuille=classeur.insertSheet(NOM_FEUILLE_REPONSES);
@@ -213,8 +170,8 @@ function normaliserAucunBesoin_(feuille) {
 function lettreColonne_(n) {
   let nom='';while(n>0){n--;nom=String.fromCharCode(65+n%26)+nom;n=Math.floor(n/26);}return nom;
 }
-function reponseIframe_(nonce,ok,code) {
-  const message=JSON.stringify({type:'orchidbleue-survey-result',nonce:nonce,ok:ok,code:code||''}).replace(/</g,'\\u003c');
+function reponseIframe_(nonce,ok) {
+  const message=JSON.stringify({type:'orchidbleue-survey-result',nonce:nonce,ok:ok}).replace(/</g,'\\u003c');
   const html='<!doctype html><html lang="fr"><head><meta charset="utf-8"></head><body>'+
     '<script>window.top.postMessage('+message+',"*");</script></body></html>';
   return HtmlService.createHtmlOutput(html)
